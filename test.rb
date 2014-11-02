@@ -207,11 +207,19 @@ bless(context, "ki")
 ki_filename = "test.ki"
 macros_source = File.read("node_modules/ki/editor/scripts/ki.sjs")
 
-ret = context.eval(%Q{
+context.eval(%Q{
     var ki = __modules['ki'];
     var sweet = __modules['sweet'];
-    var modules = sweet.loadModule(#{MultiJson.dump(macros_source)});
-    ki.compile(#{MultiJson.dump(File.read(ki_filename))}, {filename: "#{ki_filename}", modules: modules}).code
+    this.__ki_modules = sweet.loadModule(#{MultiJson.dump(macros_source)});
 })
-puts ret
+
+while true
+  puts "Compiling..."
+  ret = context.eval %Q{
+    __modules.ki.compile(#{MultiJson.dump(File.read(ki_filename))},
+      {filename: "#{ki_filename}",
+       modules: __ki_modules}).code}
+  puts "Done!"
+  sleep 1
+end
 
