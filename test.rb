@@ -19,7 +19,6 @@ end
 
 def parse(context, name)
   path = "node_modules/ki/editor/scripts/#{name}.js"
-  # source = File.read(path)
 
   context.eval %Q{
     this.define_called = false;
@@ -89,7 +88,7 @@ def print_specs(context)
 end
 
 def blessed?(context, name)
-  context.eval %Q{!!this.__modules["#{name}"]}
+  context.eval %Q{!!this.__loaded["#{name}"]}
 end
 
 def deps_satisfied?(context, deps)
@@ -117,44 +116,24 @@ def bless_candidates(context)
   candidates
 end
 
-context = V8::Context.new
+def bless(context, name)
+  return if name == 'exports'
+  return if name.start_with? 'text!'
 
-context.eval %Q{
-  this.__modules = {};
-  this.__specs = {};
-  this.__texts = {};
-  this.__define = function (name, deps, factory) {
-    __specs[name] = ({ deps: deps, factory: factory });
+  name = normalize_spec(name)
+  return if blessed?(context, name)
+
+  context.eval %Q{
+    this.__loaded["#{name}"] = true;
   }
-}
 
-parse(context, "ki")
-round = 1
-spec_count = context.eval("this.__specs").count
+  spec = context.eval %Q{this.__specs["#{name}"]}
+  puts "Checking deps of #{name}..."
+  spec[:deps].each do |dep|
+    bless(context, dep)
+  end
 
-while true do
-  parse_step(context)
-
-  new_spec_count = context.eval("this.__specs").count
-  break if new_spec_count == spec_count
-  spec_count = new_spec_count
-
-  puts "\n========== Round #{round} ==============="
-  print_specs(context)
-  round = round + 1
-end
-
-puts "Should now bless all those specs."
-
-context.eval %Q{
-  Object.keys(this.__specs).forEach(function (name) {
-    __modules[name] = {};
-  });
-}
-
-specs = context.eval %Q{this.__specs}
-specs.to_a.reverse.each do |name, spec|
-  puts "Blessing #{name}."
+  puts "Blessing #{name}"
 
   context.eval %Q{
     var exports = __modules["#{name}"];
@@ -187,11 +166,52 @@ specs.to_a.reverse.each do |name, spec|
   }
 end
 
-source = %Q{
-  console.log("Hi.");
+context = V8::Context.new
+
+context.eval %Q{
+  this.__modules = {};
+  this.__loaded = {};
+  this.__specs = {};
+  this.__texts = {};
+  this.__define = function (name, deps, factory) {
+    __specs[name] = ({ deps: deps, factory: factory });
+  }
 }
 
-# ret = context.eval("__modules['ki'].compile(#{MultiJson.dump(source)}, {})")
-ret = context.eval("__modules['ki'].compile(\"\", {})")
+parse(context, "ki")
+round = 1
+spec_count = context.eval("this.__specs").count
+
+while true do
+  parse_step(context)
+
+  new_spec_count = context.eval("this.__specs").count
+  break if new_spec_count == spec_count
+  spec_count = new_spec_count
+
+  puts "\n========== Round #{round} ==============="
+  print_specs(context)
+  round = round + 1
+end
+
+puts "Should now bless all those specs."
+
+context.eval %Q{
+  Object.keys(this.__specs).forEach(function (name) {
+    __modules[name] = {};
+  });
+}
+
+bless(context, "ki")
+
+ki_filename = "test.ki"
+macros_source = File.read("node_modules/ki/editor/scripts/ki.sjs")
+
+ret = context.eval(%Q{
+    var ki = __modules['ki'];
+    var sweet = __modules['sweet'];
+    var modules = sweet.loadModule(#{MultiJson.dump(macros_source)});
+    ki.compile(#{MultiJson.dump(File.read(ki_filename))}, {filename: "#{ki_filename}", modules: modules}).code
+})
 puts ret
 
